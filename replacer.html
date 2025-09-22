@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Thoughtcrime Checker — Replacer Tool</title>
+  <style>
+    .highlight {
+      text-decoration: underline;
+      text-decoration-color: red;
+      text-decoration-style: wavy;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background-color: #7a1519;
+      color: white;
+    }
+    .container {
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+    nav a {
+      color: #ffcc00;
+      text-decoration: none;
+      font-weight: bold;
+      margin-right: 20px;
+    }
+    nav a:hover { color: #fff; text-decoration: underline; }
+    h2, h3 { text-align: center; }
+    .panel {
+      background: #fff;
+      color: #000;
+      border-radius: 10px;
+      box-shadow: 2px 2px 10px rgba(0,0,0,.3);
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    pre.output {
+      width: 100%;
+      min-height: 220px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 16px;
+      box-sizing: border-box;
+      background: #fff;
+      color: #000;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: center;
+      margin: 10px 0 0;
+    }
+    button {
+      border: none;
+      padding: 10px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-weight: bold;
+      background: #ffcc00;
+    }
+    button:hover { filter: brightness(1.05); }
+    .meta {
+      text-align: center;
+      font-size: 14px;
+      opacity: .9;
+      margin-top: 8px;
+    }
+    .change {
+      background: #e6ffe6; /* light green for replaced chunks */
+      border-radius: 4px;
+      padding: 0 2px;
+    }
+    .note { font-size: 14px; opacity: .9; }
+    .footer-note { text-align: center; font-size: 13px; opacity: .8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav style="text-align:left; margin-bottom:20px;">
+      <a href="index.html">Home</a>
+      <a href="banned-words.html">Banned Words List</a>
+      <a href="replacer.html">Replacer Tool</a>
+    </nav>
+
+    <h2>Replacer Tool</h2>
+    <p class="note" style="text-align:center;">
+      Paste your text below and replace any banned words/phrases with an approved phrase.
+    </p>
+
+    <div class="panel">
+      <h3 style="margin-top:0;">Input</h3>
+      <div id="input" contenteditable="true" spellcheck="false"
+           style="width:100%; min-height:220px; border:1px solid #ccc; border-radius:8px;
+                  padding:12px; font-size:16px; background:#fff; color:#000; white-space:pre-wrap;"></div>
+      <div class="controls">
+        <button id="replaceBtn">Replace banned words</button>
+        <button id="copyBtn" title="Copy the output text">Copy output</button>
+        <button id="resetBtn" title="Clear both boxes">Clear</button>
+      </div>
+      <div class="meta" id="stats">No replacements yet.</div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top:0;">Output (preview)</h3>
+      <pre class="output" id="output" aria-live="polite"></pre>
+      <p class="footer-note">
+        Privacy: Everything runs in your browser. Nothing is sent to a server.
+      </p>
+    </div>
+  </div>
+
+  <!-- Shared banned list -->
+  <script src="banned-words.js"></script>
+
+  <!-- Highlighter for the input box -->
+<script>
+  function escapeHTML(str) {
+    return str.replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+  }
+
+  // Escape banned words that contain regex chars (e.g., slashes, +, etc.)
+  function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  // --- Caret helpers (save/restore by character offset) ---
+  function getCaretCharacterOffsetWithin(element) {
+    const sel = window.getSelection();
+    let caretOffset = 0;
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const preRange = range.cloneRange();
+      preRange.selectNodeContents(element);
+      preRange.setEnd(range.endContainer, range.endOffset);
+      caretOffset = preRange.toString().length;
+    }
+    return caretOffset;
+  }
+
+  function setCaretPosition(element, offset) {
+    const range = document.createRange();
+    const sel = window.getSelection();
+    let currentNode = null;
+    let walked = 0;
+
+    (function traverse(node) {
+      if (currentNode) return; // found already
+      if (node.nodeType === Node.TEXT_NODE) {
+        const len = node.textContent.length;
+        if (walked + len >= offset) {
+          currentNode = node;
+          const localOffset = offset - walked;
+          range.setStart(node, localOffset);
+          range.collapse(true);
+          return;
+        }
+        walked += len;
+      } else {
+        for (let i = 0; i < node.childNodes.length; i++) {
+          traverse(node.childNodes[i]);
+          if (currentNode) return;
+        }
+      }
+    })(element);
+
+    sel.removeAllRanges();
+    if (currentNode) {
+      sel.addRange(range);
+    } else {
+      // Fallback: put caret at end
+      range.selectNodeContents(element);
+      range.collapse(false);
+      sel.addRange(range);
+    }
+  }
+
+  function highlightInput() {
+    const editor = document.getElementById("input");
+
+    // Save caret as a character index in the *plain text*
+    const caret = getCaretCharacterOffsetWithin(editor);
+
+    // Get plain text and rebuild with highlight spans
+    let text = editor.innerText || "";
+    text = escapeHTML(text);
+
+    (window.BANNED_WORDS || []).forEach(word => {
+      const re = new RegExp(`\\b(${escapeRegex(word)})\\b`, "gi");
+      text = text.replace(re, '<span class="highlight">$1</span>');
+    });
+
+    editor.innerHTML = text;
+
+    // Keep editor focusable when empty
+    if (editor.innerHTML === "") editor.innerHTML = "&#8203;";
+
+    // Restore caret to the same character index
+    setCaretPosition(editor, caret);
+  }
+
+  // Run on every edit
+  document.getElementById("input").addEventListener("input", highlightInput);
+</script>
+
+
+<!-- Replacer logic -->
+<script>
+  // Pick from these five at random (edit these to whatever you like)
+  const APPROVED_OPTIONS = [
+    "I love Mr. Trump",
+    "our president has beauiful skin and hair",
+    "the president has a strong and muscular physique",
+    "Donald J. Trump is the greatest president in the history of the United States of America",
+    "the president is cognitively incapable of error",
+    "make america great again",
+    "Budweiser is too woke"
+
+  ];
+
+  function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function buildRegexFromList(list) {
+    const sorted = [...list].sort((a, b) => b.length - a.length);
+    const pattern = sorted.map(escapeRegex).join("|");
+    return new RegExp(`\\b(${pattern})\\b`, "gi");
+  }
+
+  // Returns a random phrase from APPROVED_OPTIONS
+  function pickApproved() {
+    const i = Math.floor(Math.random() * APPROVED_OPTIONS.length);
+    return APPROVED_OPTIONS[i];
+  }
+
+  // One-pass replacement using tokens so preview and plain text match exactly
+  function replaceBanned(text, regex) {
+    let counter = 0;
+    const tokens = [];
+
+    // First: replace matches with unique tokens and record chosen phrases
+    const withTokens = text.replace(regex, () => {
+      const choice = pickApproved();
+      const token = `@@APPROVED_${counter++}@@`;
+      tokens.push({ token, choice });
+      return token;
+    });
+
+    // Plain text version (no HTML)
+    const replacedText = tokens.reduce(
+      (s, { token, choice }) => s.replaceAll(token, choice),
+      withTokens
+    );
+
+    // Highlighted preview (wrap the chosen phrases)
+    const highlighted = tokens.reduce(
+      (s, { token, choice }) =>
+        s.replaceAll(token, `<span class="change">${escapeHTML(choice)}</span>`),
+      withTokens
+    );
+
+    return { count: tokens.length, replacedText, highlighted };
+  }
+
+  const inputEl  = document.getElementById("input");
+  const outputEl = document.getElementById("output");
+  const statsEl  = document.getElementById("stats");
+  const replaceBtn = document.getElementById("replaceBtn");
+  const copyBtn    = document.getElementById("copyBtn");
+  const resetBtn   = document.getElementById("resetBtn");
+
+  const bannedRegex = buildRegexFromList(window.BANNED_WORDS || []);
+
+  replaceBtn.addEventListener("click", () => {
+    const src = inputEl.innerText || "";   // contenteditable: use innerText
+    const { count, replacedText, highlighted } = replaceBanned(src, bannedRegex);
+    outputEl.innerHTML = highlighted;
+    outputEl.dataset.plain = replacedText;
+    statsEl.textContent = count
+      ? `${count} replacement${count === 1 ? "" : "s"} made.`
+      : "No banned words/phrases found.";
+  });
+
+  copyBtn.addEventListener("click", async () => {
+    const plain = outputEl.dataset.plain ?? "";
+    try {
+      await navigator.clipboard.writeText(plain);
+      const prev = statsEl.textContent;
+      statsEl.textContent = "Output copied to clipboard.";
+      setTimeout(() => (statsEl.textContent = prev), 1500);
+    } catch {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(outputEl);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  });
+
+  resetBtn.addEventListener("click", () => {
+    inputEl.innerText = "";
+    outputEl.innerHTML = "";
+    delete outputEl.dataset.plain;
+    statsEl.textContent = "No replacements yet.";
+  });
+</script>
+
+</body>
+</html>
