@@ -115,12 +115,10 @@ img {
 
 <!-- Description of the project -->
 <div id="description">
-    <h3>Paste your grant abstract into the text editor above and 
-      Thoughtcrime Checker will underline any words on the 
-      <a href="https://bsky.app/profile/jfmclaughlin92.bsky.social/post/3lhd4eswp322v" target="_blank">Banned List!</a></h3>
+    <h3>Paste your text (grant abstract, manuscript, etc.) into the box above and Thoughtcrime Checker will underline any words on any of the the Banned Lists!</h3>
     <p>
        Simply remove the offending words and you might evade the Thought Police!
-</p> 
+</p>
   </div>
 
   <!-- Add this at the very bottom of your body section -->
@@ -133,9 +131,8 @@ img {
       and was inspired by the <a href="https://splasho.com/upgoer5/" target="_blank">Up-Goer Five Text Editor</a> by
     <a href="https://bsky.app/profile/theo.io" target="_blank">Theo Sanderson</a>
     (which was itself inspired by <a href="https://bsky.app/profile/xkcd.com" target="_blank">xkcd</a>). 
-    More details about the list <a href="https://www.washingtonpost.com/science/2025/02/04/national-science-foundation-trump-executive-orders-words/" target="_blank">here</a>.
     While this started out as a joke, apparently people are finding it useful so I'm trying to keep it current. If you have
-    inside knowledge of other words I should add to the list, have ideas for new features, or if you find bugs, feel free to
+     knowledge of other words I should add to the list, have ideas for new features, or if you find bugs, feel free to
     <a href="https://bradleyallf.com/contact/" target="_blank">reach out</a>.
     </p>
     <p><strong>Privacy Notice:</strong> All text entered in this editor is processed entirely in your web browser. No data is stored, transmitted, or shared with any server. Your input remains private and disappears when you refresh the page.</p>
@@ -152,6 +149,11 @@ img {
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
     }
+
+      // Escape user-supplied banned list entries for safe RegExp construction
+      function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
   
     function getCaretCharacterOffsetWithin(element) {
       const selection = window.getSelection();
@@ -212,11 +214,13 @@ img {
       let text = editor.innerText;
       text = escapeHTML(text);
   
-      // Highlight words
-      BANNED_WORDS.forEach(word => {
-        const regex = new RegExp(`\\b(${word})\\b`, 'gi');
+      // Build one combined regex (longer-first) and escape list entries.
+      const list = window.BANNED_WORDS || [];
+      if (list.length > 0) {
+        const pattern = [...list].sort((a, b) => b.length - a.length).map(escapeRegex).join('|');
+        const regex = new RegExp(`\\b(${pattern})\\b`, 'gi');
         text = text.replace(regex, '<span class="highlight">$1</span>');
-      });
+      }
   
       // Update content
       editor.innerHTML = text;

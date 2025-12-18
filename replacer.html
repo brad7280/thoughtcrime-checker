@@ -97,9 +97,9 @@
 
     <div class="panel">
       <h3 style="margin-top:0;">Input</h3>
-      <div id="input" contenteditable="true" spellcheck="false"
-           style="width:100%; min-height:220px; border:1px solid #ccc; border-radius:8px;
-                  padding:12px; font-size:16px; background:#fff; color:#000; white-space:pre-wrap;"></div>
+       <div id="input" contenteditable="true" spellcheck="false"
+         style="width:100%; box-sizing:border-box; min-height:220px; border:1px solid #ccc; border-radius:8px;
+             padding:12px; font-size:16px; background:#fff; color:#000; white-space:pre-wrap; overflow-wrap:break-word; word-wrap:break-word;"></div>
       <div class="controls">
         <button id="replaceBtn">Replace banned words</button>
         <button id="copyBtn" title="Copy the output text">Copy output</button>
@@ -194,10 +194,12 @@
     let text = editor.innerText || "";
     text = escapeHTML(text);
 
-    (window.BANNED_WORDS || []).forEach(word => {
-      const re = new RegExp(`\\b(${escapeRegex(word)})\\b`, "gi");
+    // Build a single combined regex (longer-first) to prefer multi-word phrases
+    const list = window.BANNED_WORDS || [];
+    if (list.length > 0) {
+      const re = buildRegexFromList(list);
       text = text.replace(re, '<span class="highlight">$1</span>');
-    });
+    }
 
     editor.innerHTML = text;
 
@@ -287,7 +289,7 @@
     outputEl.innerHTML = highlighted;
     outputEl.dataset.plain = replacedText;
     statsEl.textContent = count
-      ? `${count} replacement${count === 1 ? "" : "s"} made.`
+      ? `${count} thoughtcrime${count === 1 ? "" : "s"} erased.`
       : "No banned words/phrases found.";
   });
 
